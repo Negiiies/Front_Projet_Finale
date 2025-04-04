@@ -3,31 +3,41 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../../lib/auth';
+import { useNotification } from '../../../contexts/NotificationContext';
 import evaluationService, { Evaluation } from '../../../services/evaluationService';
 import Link from 'next/link';
 import { PlusIcon, PencilIcon, TrashIcon, EyeIcon } from '@heroicons/react/24/outline';
+import LoadingSpinner from '../../../components/ui/LoadingSpinner';
 
 export default function EvaluationsPage() {
   const { user } = useAuth();
+  const { showNotification } = useNotification();
+  
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Filtres
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     const fetchEvaluations = async () => {
       try {
+        setLoading(true);
         const data = await evaluationService.getEvaluations();
         setEvaluations(data);
       } catch (err) {
         console.error('Erreur lors du chargement des évaluations', err);
         setError('Impossible de charger les évaluations. Veuillez réessayer plus tard.');
+        showNotification('error', 'Erreur de chargement', 'Impossible de charger les évaluations.');
       } finally {
         setLoading(false);
       }
     };
 
     fetchEvaluations();
-  }, []);
+  }, [showNotification]);
 
   const handleDelete = async (id: number) => {
     if (!window.confirm('Êtes-vous sûr de vouloir supprimer cette évaluation ?')) {
@@ -37,26 +47,25 @@ export default function EvaluationsPage() {
     try {
       await evaluationService.deleteEvaluation(id);
       setEvaluations(evaluations.filter(evaluation => evaluation.id !== id));
+      showNotification('success', 'Évaluation supprimée', 'L\'évaluation a été supprimée avec succès.');
     } catch (err) {
       console.error('Erreur lors de la suppression', err);
-      setError('Impossible de supprimer cette évaluation.');
+      showNotification('error', 'Erreur de suppression', 'Impossible de supprimer cette évaluation.');
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#138784]"></div>
-      </div>
-    );
-  }
+  // Filtrer les évaluations
+  const filteredEvaluations = evaluations.filter(evaluation => {
+    const matchesStatus = statusFilter === 'all' || evaluation.status === statusFilter;
+    const matchesSearch = evaluation.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (evaluation.student?.name?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
+      (evaluation.teacher?.name?.toLowerCase().includes(searchTerm.toLowerCase()) || false);
+    
+    return matchesStatus && matchesSearch;
+  });
 
-  if (error) {
-    return (
-      <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
-        {error}
-      </div>
-    );
+  if (loading) {
+    return <LoadingSpinner size="lg" text="Chargement des évaluations..." />;
   }
 
   const isTeacherOrAdmin = user?.role === 'teacher' || user?.role === 'admin';
@@ -76,9 +85,55 @@ export default function EvaluationsPage() {
         )}
       </div>
 
-      {evaluations.length === 0 ? (
+      {/* Filtres */}
+      <div className="bg-white rounded-lg shadow p-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="searchTerm" className="block text-sm font-medium text-gray-700 mb-1">
+              Rechercher
+            </label>
+            <input
+              type="text"
+              id="searchTerm"
+              placeholder="Titre, étudiant ou professeur..."
+              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-[#138784] focus:border-[#138784]"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          
+          <div>
+            <label htmlFor="statusFilter" className="block text-sm font-medium text-gray-700 mb-1">
+              Statut
+            </label>
+            <select
+              id="statusFilter"
+              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-[#138784] focus:border-[#138784]"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="all">Tous les statuts</option>
+              <option value="draft">Brouillon</option>
+              <option value="published">Publiée</option>
+              <option value="archived">Archivée</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
+          {error}
+        </div>
+      )}
+
+      {filteredEvaluations.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-6 text-center">
-          <p className="text-gray-500">Aucune évaluation disponible pour le moment.</p>
+          <p className="text-gray-500">
+            {searchTerm || statusFilter !== 'all'
+              ? 'Aucune évaluation ne correspond aux critères sélectionnés.'
+              : 'Aucune évaluation disponible pour le moment.'}
+          </p>
         </div>
       ) : (
         <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -98,8 +153,8 @@ export default function EvaluationsPage() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {evaluations.map((evaluation) => (
-                <tr key={evaluation.id}>
+              {filteredEvaluations.map((evaluation) => (
+                <tr key={evaluation.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900">{evaluation.title}</div>
                   </td>
@@ -114,7 +169,8 @@ export default function EvaluationsPage() {
                         evaluation.status === 'draft' ? 'bg-yellow-100 text-yellow-800' : 
                         'bg-gray-100 text-gray-800'}`}>
                       {evaluation.status === 'published' ? 'Publiée' : 
-                       evaluation.status === 'draft' ? 'Brouillon' : 'Archivée'}
+                       evaluation.status === 'draft' ? 'Brouillon' : 
+                       'Archivée'}
                     </span>
                   </td>
                   {user?.role === 'teacher' && (
@@ -132,15 +188,19 @@ export default function EvaluationsPage() {
                       <Link 
                         href={`/evaluations/${evaluation.id}`} 
                         className="text-blue-600 hover:text-blue-900"
+                        title="Voir détails"
                       >
                         <EyeIcon className="h-5 w-5" />
                       </Link>
                       
-                      {isTeacherOrAdmin && evaluation.status === 'draft' && (
+                      {isTeacherOrAdmin && 
+                       evaluation.status === 'draft' && 
+                       evaluation.teacherId === user?.userId && (
                         <>
                           <Link 
                             href={`/evaluations/${evaluation.id}/edit`} 
                             className="text-indigo-600 hover:text-indigo-900"
+                            title="Modifier"
                           >
                             <PencilIcon className="h-5 w-5" />
                           </Link>
@@ -148,6 +208,7 @@ export default function EvaluationsPage() {
                           <button 
                             onClick={() => handleDelete(evaluation.id)} 
                             className="text-red-600 hover:text-red-900"
+                            title="Supprimer"
                           >
                             <TrashIcon className="h-5 w-5" />
                           </button>

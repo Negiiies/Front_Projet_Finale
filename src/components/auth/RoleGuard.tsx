@@ -1,27 +1,40 @@
-// Créer un composant HOC (Higher Order Component) pour protéger les routes basées sur le rôle
-// Nouveau fichier: src/components/auth/RoleGuard.tsx
+// src/components/auth/RoleGuard.tsx
 'use client';
 
-import { useAuth } from '../../lib/auth';
+import { ReactNode, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useAuth, UserRole, hasRequiredRole } from '../../lib/auth';
 
+interface RoleGuardProps {
+  children: ReactNode;
+  allowedRoles: UserRole[];
+  redirectTo?: string;
+}
 
-type RoleGuardProps = {
-  children: React.ReactNode;
-  allowedRoles: ('student' | 'teacher' | 'admin')[];
-};
-
-export default function RoleGuard({ children, allowedRoles }: RoleGuardProps) {
+/**
+ * Composant pour protéger les routes basées sur le rôle de l'utilisateur.
+ * Si l'utilisateur n'a pas le rôle requis, il est redirigé vers la page spécifiée.
+ */
+export default function RoleGuard({ 
+  children, 
+  allowedRoles, 
+  redirectTo = '/dashboard' 
+}: RoleGuardProps) {
   const { user, isLoading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!isLoading && (!user || !allowedRoles.includes(user.role))) {
-      router.push('/dashboard');
+    // Attendre que l'auth soit chargée
+    if (!isLoading) {
+      // Rediriger si l'utilisateur n'a pas le rôle requis
+      if (!hasRequiredRole(user, allowedRoles)) {
+        console.warn(`Access denied: user role ${user?.role} not in allowed roles [${allowedRoles.join(', ')}]`);
+        router.push(redirectTo);
+      }
     }
-  }, [user, isLoading, router, allowedRoles]);
+  }, [user, isLoading, allowedRoles, redirectTo, router]);
 
+  // Afficher un indicateur de chargement pendant la vérification
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -30,10 +43,16 @@ export default function RoleGuard({ children, allowedRoles }: RoleGuardProps) {
     );
   }
 
-  if (!user || !allowedRoles.includes(user.role)) {
+  // Ne rien afficher si l'utilisateur n'a pas le rôle requis
+  if (!hasRequiredRole(user, allowedRoles)) {
     return null;
   }
 
+  // Rendre les enfants si l'utilisateur a le rôle requis
   return <>{children}</>;
 }
 
+// Exemple d'utilisation:
+// <RoleGuard allowedRoles={['admin']}>
+//   <AdminDashboard />
+// </RoleGuard>
